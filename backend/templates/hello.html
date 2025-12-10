@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Simulador de Negocios BC</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+body { margin: 0; font-family: 'Inter', sans-serif; }
+.contenedor { 
+    display: flex; 
+    flex-direction: column; 
+    height: 100vh;
+}
+#mapa { 
+    width: 100%; 
+    height: 40vh; 
+    min-height: 250px; 
+}
+.panel { 
+    width: 100%; 
+    padding: 15px; 
+    background: #f4f4f4; 
+    overflow-y: auto; 
+    flex-grow: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 15px;
+}
+.bloque { 
+    background: white; 
+    padding: 15px; 
+    border-radius: 8px; 
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    position: relative; /* Para el autocompletar */
+}
+input, button, select { 
+    width: 100%; 
+    padding: 10px; 
+    margin-top: 5px; 
+    margin-bottom: 5px; 
+    box-sizing: border-box; 
+    border: 1px solid #ccc; 
+    border-radius: 4px;
+    font-size: 14px;
+}
+button {
+    background-color: #3b82f6;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+button:hover {
+    background-color: #2563eb;
+}
+label { 
+    display: block; 
+    margin-top: 10px; 
+    font-weight: 600; 
+    font-size: 0.9em; 
+}
+h3 {
+    margin-top: 0;
+    color: #1e40af;
+    border-bottom: 2px solid #eff6ff;
+    padding-bottom: 5px;
+}
+pre { 
+    background: #1f2937; 
+    color: #4ade80; 
+    padding: 10px; 
+    max-height: 200px; 
+    overflow: auto; 
+    border-radius: 4px; 
+    font-size: 0.8em;
+    white-space: pre-wrap; /* Wrap long lines */
+    word-break: break-all;
+}
+
+/* Estilos de Autocompletar */
+#sugerencias {
+    list-style: none; 
+    padding: 0; 
+    margin: 0;
+    border: 1px solid #ddd; 
+    max-height: 150px; 
+    overflow-y: auto; 
+    background-color: white;
+    z-index: 10;
+    border-radius: 4px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+#sugerencias li {
+    padding: 8px 10px;
+    cursor: pointer;
+    border-bottom: 1px dotted #eee;
+    font-size: 0.9em;
+}
+#sugerencias li:last-child {
+    border-bottom: none;
+}
+#sugerencias li:hover {
+    background-color: #eff6ff;
+}
+
+@media (min-width: 768px) {
+    .contenedor { 
+        flex-direction: row; 
+    }
+    #mapa { 
+        width: 50%; 
+        height: 100vh; 
+    }
+    .panel { 
+        width: 50%; 
+        height: 100vh;
+        display: flex; /* Cambiar a flex para un scroll más fácil del panel */
+        flex-direction: column;
+        align-content: flex-start;
+        flex-wrap: wrap;
+        
+    }
+    .resultado-box {
+        grid-column: 1 / -1; /* Ocupa todo el ancho en desktop */
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="contenedor">
+    <div id="mapa"></div>
+
+    <div class="panel">
+        <h2 style="width: 100%; margin-top: 0; color: #1e40af;">📊 Simulador de Negocios BC</h2>
+
+        <!-- Bloque 6: Búsqueda Predictiva por Nombre -->
+        <div class="bloque">
+            <h3>Búsqueda por Nombre</h3>
+            <label for="nombre_busqueda">Nombre del Negocio:</label>
+            <input type="text" id="nombre_busqueda" placeholder="Escribe el nombre..." 
+                   onkeyup="autoCompletarNombre(this.value)">
+            
+            <!-- Contenedor para sugerencias -->
+            <ul id="sugerencias"></ul>
+            
+            <p style="margin: 5px 0; font-size: 0.9em;">Número de registro: <strong id="id_seleccionado" style="color: #ef4444;">Ninguno</strong></p>
+            <button onclick="buscarPorIdSeleccionado()">🔍 Buscar Negocio Seleccionado</button>
+        </div>
+
+        <!-- Bloque 2: Búsqueda por ID -->
+        <div class="bloque">
+            <h3>Búsqueda por ID</h3>
+            <label for="id_negocio">ID del Registro:</label>
+            <input type="number" id="id_negocio" value="1" min="1">
+            <button onclick="buscarPorId()">🔍 Buscar por ID</button>
+        </div>
+
+        <!-- Bloque 1: Cargar Todos los Negocios -->
+        <div class="bloque">
+            <h3>Cargar Mapa Completo</h3>
+            <button onclick="cargarTodos()">✅ Cargar todos los negocios (Mapa)</button>
+        </div>
+
+        <!-- Bloque 3: Búsqueda por Radio -->
+        <div class="bloque">
+            <h3>Búsqueda por Radio</h3>
+            <label for="latitud_radio">Latitud (Ej: 32.5)</label>
+            <input type="number" id="latitud_radio" value="32.5" step="0.0001">
+            <label for="longitud_radio">Longitud (Ej: -116.9)</label>
+            <input type="number" id="longitud_radio" value="-116.9" step="0.0001">
+            <label for="radio_km">Radio (km)</label>
+            <input type="number" id="radio_km" value="1" min="0.1">
+            <button onclick="buscarPorRadio()">📍 Buscar por Radio</button>
+        </div>
+
+        <!-- Bloque 4: Búsqueda por Actividad -->
+        <div class="bloque">
+            <h3>Búsqueda por Actividad</h3>
+            <label for="id_actividad">ID Actividad Empresarial (Ej: 6111)</label>
+            <input type="number" id="id_actividad" value="6111">
+            <button onclick="buscarPorActividad()">🏭 Buscar por Actividad</button>
+        </div>
+        
+        <!-- Bloque 5: Recomendación -->
+        <div class="bloque">
+            <h3>Recomendación de Negocio</h3>
+            <label for="latitud_rec">Latitud</label>
+            <input type="number" id="latitud_rec" value="32.5" step="0.0001">
+            <label for="longitud_rec">Longitud</label>
+            <input type="number" id="longitud_rec" value="-116.9" step="0.0001">
+            <label for="radio_rec">Radio (km)</label>
+            <input type="number" id="radio_rec" value="1" min="0.1">
+            <label for="actividad_rec">ID Actividad Empresarial (a recomendar)</label>
+            <input type="number" id="actividad_rec" value="6111">
+            <button onclick="obtenerRecomendacion()">⭐ Obtener Recomendación</button>
+        </div>
+
+        <div class="bloque resultado-box" style="grid-column: 1 / -1; width: 100%;">
+            <h3>Resultado de la API</h3>
+            <pre id="resultado"></pre>
+        </div>
+
+        <!-- Bloque 1b: Limpiar Mapa -->
+    <div class="bloque">
+        <h3>Limpiar Mapa</h3>
+        <button onclick="limpiarMapa()">🧹 Limpiar Mapa</button>
+    </div>
+
+
+    </div>
+</div>
+
+<script>
+// El puerto de Flask es 5500 por defecto. Si tu API corre en 5500, usa esa URL.
+const BASE_URL = "http://localhost:5500"; 
+
+// Inicialización del Mapa
+let mapa = L.map('mapa').setView([32.5, -116.9], 7); // Centrado en BC
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18
+}).addTo(mapa);
+
+let marcadores = [];
+let idSeleccionado = null; // Para la búsqueda predictiva
+
+// --- Funciones de Utilidad ---
+
+function limpiarMapa(){
+    marcadores.forEach(m => mapa.removeLayer(m));
+    marcadores = [];
+}
+
+function mostrar(data){
+    document.getElementById("resultado").textContent =
+        JSON.stringify(data, null, 2);
+}
+
+function pintarEnMapa(data){
+    limpiarMapa();
+
+    const negociosConCoordenadas = data.filter(n => 
+        !isNaN(parseFloat(n.latitud)) && !isNaN(parseFloat(n.longitud))
+    );
+
+    if (negociosConCoordenadas.length === 0) {
+        mostrar({ mensaje: "No hay negocios con coordenadas válidas para pintar." });
+        return;
+    }
+
+    negociosConCoordenadas.forEach(n => {
+        const lat = parseFloat(n.latitud);
+        const lon = parseFloat(n.longitud);
+        
+        const m = L.circleMarker([lat, lon], {
+            radius: 6,
+            color: "#3b82f6", // Color azul para los marcadores
+            fillColor: "#3b82f6",
+            fillOpacity: 0.8
+        }).addTo(mapa);
+
+        // Usamos las columnas de texto que ahora deberían estar disponibles
+        const nombre = n.nombre_comercial || 'N/A';
+        const actividad = n.actividad_texto || 'N/A';
+
+        m.bindPopup(`<b>Nombre:</b> ${nombre}<br><b>Actividad:</b> ${actividad}<br><b>ID:</b> ${n.id_registro}`);
+        marcadores.push(m);
+    });
+
+    // Ajustar el mapa a los marcadores
+    const grupo = L.featureGroup(marcadores);
+    mapa.fitBounds(grupo.getBounds(), { padding: [50, 50] });
+}
+
+
+// ---BÚSQUEDA PREDICTIVA (Autocompletar) ---
+
+function autoCompletarNombre(texto) {
+    const contenedorSugerencias = document.getElementById("sugerencias");
+    contenedorSugerencias.innerHTML = ""; // Limpiar sugerencias
+    idSeleccionado = null;
+    document.getElementById("id_seleccionado").textContent = "Ninguno";
+
+    if (texto.length < 3) {
+        return;
+    }
+    
+    // Llamar a la API de búsqueda por nombre
+    fetch(`${BASE_URL}/excel/negocio/buscar-nombre?nombre=${texto}`)
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) {
+                contenedorSugerencias.innerHTML = `<li style="padding: 5px; color: red;">Error: ${data.error}</li>`;
+                // Muestra el detalle del error en el pre
+                mostrar(data);
+                return;
+            }
+
+            data.forEach(item => {
+                const li = document.createElement("li");
+                li.textContent = `${item.nombre_comercial} (ID: ${item.id_registro})`;
+
+                // Al hacer clic, se selecciona el ID
+                li.onclick = () => {
+                    document.getElementById("nombre_busqueda").value = item.nombre_comercial;
+                    idSeleccionado = item.id_registro;
+                    document.getElementById("id_seleccionado").textContent = item.id_registro;
+                    contenedorSugerencias.innerHTML = ""; // Ocultar sugerencias
+                };
+
+                contenedorSugerencias.appendChild(li);
+            });
+
+            if (data.length === 0) {
+                 contenedorSugerencias.innerHTML = `<li style="padding: 8px; color: #9ca3af;">No se encontraron coincidencias.</li>`;
+            }
+        })
+        .catch(error => {
+            mostrar({ error: "Error de conexión en autocompletar:", detalle: error.message });
+        });
+}
+
+// Llama a la búsqueda por ID con el ID seleccionado
+function buscarPorIdSeleccionado() {
+    if (idSeleccionado) {
+        document.getElementById("id_negocio").value = idSeleccionado;
+        buscarPorId(); 
+    } else {
+        mostrar({ mensaje: "Por favor, selecciona un negocio de la lista de sugerencias." });
+    }
+}
+
+
+// --- Negocio por ID ---
+function buscarPorId(){
+    const id = document.getElementById("id_negocio").value;
+    mostrar({ mensaje: `Buscando negocio con registro: ${id}...` });
+
+    fetch(`${BASE_URL}/excel/negocio/${id}`)
+        .then(r => {
+            if (!r.ok) {
+                return r.json().then(error => { throw new Error(error.error || r.statusText); });
+            }
+            return r.json();
+        })
+        .then(data => {
+            mostrar(data);
+            pintarEnMapa([data]);
+        })
+        .catch(error => {
+            mostrar({ error: "Error en la búsqueda:", detalle: error.message });
+            limpiarMapa();
+        });
+}
+
+
+// ---Cargar Todos (Mapa) ---
+function cargarTodos(){
+    mostrar({ mensaje: "Cargando todos los negocios (coordenadas)..." });
+    fetch(`${BASE_URL}/excel/negocio/mapa`)
+        .then(r => {
+            // ⚠️ Edición aquí para manejar mejor el error 500
+            if (!r.ok) {
+                // Intenta leer el cuerpo JSON del error para obtener el detalle de Python
+                return r.json().then(error => { 
+                    throw new Error(error.detalle || error.error || r.statusText); 
+                }).catch(() => {
+                    // Si no es JSON o falla la lectura, arroja un error genérico con el status
+                    throw new Error(`Error ${r.status}: El servidor no pudo procesar la solicitud. (Ver logs de Python)`);
+                });
+            }
+            return r.json();
+        })
+        .then(data => {
+            mostrar({ mensaje: `Cargados ${data.length} registros para el mapa.` });
+            pintarEnMapa(data);
+        })
+        .catch(error => {
+            mostrar({ error: "No se pudo conectar con la API o hubo un error:", detalle: error.message });
+            limpiarMapa();
+        });
+}
+
+
+// ---Por Radio ---
+function buscarPorRadio(){
+    const lat = document.getElementById("latitud_radio").value;
+    const lon = document.getElementById("longitud_radio").value;
+    const radio = document.getElementById("radio_km").value;
+    
+    mostrar({ mensaje: `Buscando negocios a ${radio}km de [${lat}, ${lon}]...` });
+
+    const url = `${BASE_URL}/excel/negocio/por-radio?latitud=${lat}&longitud=${lon}&radio_km=${radio}`;
+
+    fetch(url)
+        .then(r => {
+            if (!r.ok) {
+                return r.json().then(error => { throw new Error(error.mensaje || error.error || r.statusText); });
+            }
+            return r.json();
+        })
+        .then(data => {
+            mostrar(data);
+            pintarEnMapa(data);
+        })
+        .catch(error => {
+            mostrar({ error: "Error en la búsqueda por radio:", detalle: error.message });
+            limpiarMapa();
+        });
+}
+
+// ---Por Actividad ---
+function buscarPorActividad(){
+    const id_act = document.getElementById("id_actividad").value;
+    mostrar({ mensaje: `Buscando negocios con ID Actividad: ${id_act}...` });
+
+    const url = `${BASE_URL}/excel/negocio/por-actividad?id_actividad_empresarial=${id_act}`;
+
+    fetch(url)
+        .then(r => {
+            if (!r.ok) {
+                return r.json().then(error => { throw new Error(error.mensaje || error.error || r.statusText); });
+            }
+            return r.json();
+        })
+        .then(data => {
+            mostrar(data);
+            pintarEnMapa(data);
+        })
+        .catch(error => {
+            mostrar({ error: "Error en la búsqueda por actividad:", detalle: error.message });
+            limpiarMapa();
+        });
+}
+
+
+// ---Recomendación ---
+function obtenerRecomendacion(){
+    const lat = document.getElementById("latitud_rec").value;
+    const lon = document.getElementById("longitud_rec").value;
+    const radio = document.getElementById("radio_rec").value;
+    const act = document.getElementById("actividad_rec").value;
+
+    mostrar({ mensaje: `Analizando recomendación para actividad ${act} en radio de ${radio}km de [${lat}, ${lon}]...` });
+
+    const url = `${BASE_URL}/excel/negocio/recomendacion-radio?latitud=${lat}&longitud=${lon}&radio_km=${radio}&id_actividad_empresarial=${act}`;
+
+    fetch(url)
+        .then(r => {
+            if (!r.ok) {
+                return r.json().then(error => { throw new Error(error.error || r.statusText); });
+            }
+            return r.json();
+        })
+        .then(data => {
+            mostrar(data);
+            limpiarMapa(); // Esta función no pinta negocios, solo muestra la recomendación
+        })
+        .catch(error => {
+            mostrar({ error: "Error al obtener recomendación:", detalle: error.message });
+            limpiarMapa();
+        });
+}
+
+function limpiarMapa(){
+    marcadores.forEach(m => mapa.removeLayer(m));
+    marcadores = [];
+}
+
+
+// DOMContentLoaded para asegurar que todas las funciones
+// están cargadas antes de llamar a cargarTodos
+document.addEventListener('DOMContentLoaded', cargarTodos);
+</script>
+
+</body>
+</html>
