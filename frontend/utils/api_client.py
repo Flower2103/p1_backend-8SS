@@ -1,6 +1,7 @@
 """
 Cliente API para comunicación con el backend Flask.
 Todas las llamadas al servidor pasan por aquí.
+VERSIÓN CORREGIDA - Manejo de errores JSON mejorado
 """
 
 import requests
@@ -19,33 +20,60 @@ class APIClient:
     def _get(self, endpoint, params=None):
         """
         Método privado para realizar peticiones GET.
-        Incluye manejo de errores y cache de Streamlit.
+        Incluye manejo de errores mejorado.
         """
+        url_completa = f"{self.base_url}{endpoint}"
+        
         try:
             response = requests.get(
-                f"{self.base_url}{endpoint}",
+                url_completa,
                 params=params,
                 timeout=30
             )
-            response.raise_for_status()
-            return response.json()
+            
+            # Verificar status code ANTES de intentar parsear JSON
+            if response.status_code == 200:
+                try:
+                    return response.json()
+                except ValueError as json_error:
+                    st.error(f"❌ Error al parsear JSON del servidor")
+                    st.error(f"URL: {url_completa}")
+                    st.error(f"Respuesta recibida: {response.text[:200]}")
+                    return None
+            else:
+                st.error(f"❌ Error del servidor (código {response.status_code})")
+                st.error(f"URL: {url_completa}")
+                try:
+                    error_data = response.json()
+                    st.error(f"Detalle: {error_data}")
+                except:
+                    st.error(f"Respuesta: {response.text[:200]}")
+                return None
+                
         except requests.exceptions.ConnectionError:
-            st.error("❌ No se pudo conectar con el servidor. ¿Está corriendo Flask en el puerto 5500?")
+            st.error("❌ **No se pudo conectar con el servidor**")
+            st.error(f"Intentando conectar a: {url_completa}")
+            st.info("💡 Verifica que Flask esté corriendo:")
+            st.code("cd backend\npython app.py", language="bash")
             return None
+            
         except requests.exceptions.Timeout:
-            st.error("⏱️ La petición tardó demasiado. Intenta con un área más pequeña.")
+            st.error("⏱️ **La petición tardó demasiado**")
+            st.info("💡 Intenta con un área más pequeña o espera unos segundos")
             return None
-        except requests.exceptions.HTTPError as e:
-            st.error(f"❌ Error del servidor: {e}")
+            
+        except requests.exceptions.RequestException as e:
+            st.error(f"❌ **Error de conexión:** {e}")
             return None
+            
         except Exception as e:
-            st.error(f"❌ Error inesperado: {e}")
+            st.error(f"❌ **Error inesperado:** {e}")
+            st.error(f"URL: {url_completa}")
             return None
     
-    @st.cache_data(ttl=3600)  # Cache por 1 hora
-    def health_check(_self):
-        """Verifica si el backend está funcionando"""
-        return _self._get("/")
+    def health_check(self):
+        """Verifica si el backend está funcionando (SIN CACHE para diagnóstico)"""
+        return self._get("/")
     
     @st.cache_data(ttl=3600)
     def obtener_todos_negocios(_self):
@@ -56,7 +84,7 @@ class APIClient:
         """Obtiene un negocio específico por su ID"""
         return self._get(f"/excel/negocio/{id_negocio}")
     
-    @st.cache_data(ttl=600)  # Cache por 10 minutos
+    @st.cache_data(ttl=600)
     def obtener_negocios_por_radio(_self, latitud, longitud, radio_km):
         """
         Obtiene todos los negocios dentro de un radio.
@@ -67,14 +95,23 @@ class APIClient:
             radio_km (float): Radio en kilómetros
             
         Returns:
-            list: Lista de negocios en la zona
+            list: Lista de negocios en la zona o None si hay error
         """
         params = {
             "latitud": latitud,
             "longitud": longitud,
             "radio_km": radio_km
         }
-        return _self._get("/excel/negocio/por-radio", params=params)
+        resultado = _self._get("/excel/negocio/por-radio", params=params)
+        
+        # Asegurar que siempre devuelve lista o None (nunca dict con error)
+        if resultado is None:
+            return None
+        elif isinstance(resultado, list):
+            return resultado
+        else:
+            st.warning(f"⚠️ Respuesta inesperada del servidor: {type(resultado)}")
+            return None
     
     @st.cache_data(ttl=600)
     def obtener_negocios_por_actividad(_self, id_actividad):
@@ -88,9 +125,16 @@ class APIClient:
             list: Lista de negocios con esa actividad
         """
         params = {"id_actividad_empresarial": id_actividad}
-        return _self._get("/excel/negocio/por-actividad", params=params)
+        resultado = _self._get("/excel/negocio/por-actividad", params=params)
+        
+        if resultado is None:
+            return None
+        elif isinstance(resultado, list):
+            return resultado
+        else:
+            return None
     
-    @st.cache_data(ttl=300)  # Cache por 5 minutos
+    @st.cache_data(ttl=300)
     def obtener_recomendacion(_self, latitud, longitud, radio_km, id_actividad):
         """
         Obtiene la recomendación de apertura de negocio.
@@ -105,8 +149,8 @@ class APIClient:
             dict: {
                 "total_en_radio": int,
                 "similares": int,
-                "recomendacion": str ("Buena oportunidad" o "Zona saturada")
-            }
+                "recomendacion": str
+            } o None si hay error
         """
         params = {
             "latitud": latitud,
@@ -116,7 +160,7 @@ class APIClient:
         }
         return _self._get("/excel/negocio/recomendacion-radio", params=params)
     
-    @st.cache_data(ttl=3600)  # Cache por 1 hora (datos estáticos)
+    @st.cache_data(ttl=3600)
     def obtener_datos_mapa(_self):
         """
         Obtiene datos ligeros para pintar el mapa.
@@ -125,7 +169,14 @@ class APIClient:
         Returns:
             list: Lista con {id_registro, latitud, longitud, id_actividad_empresarial}
         """
-        return _self._get("/excel/negocio/mapa")
+        resultado = _self._get("/excel/negocio/mapa")
+        
+        if resultado is None:
+            return []
+        elif isinstance(resultado, list):
+            return resultado
+        else:
+            return []
     
     def buscar_por_nombre(self, nombre):
         """
@@ -136,13 +187,20 @@ class APIClient:
             nombre (str): Texto a buscar
             
         Returns:
-            list: Top 5 resultados con nombre e ID
+            list: Top 10 resultados con nombre e ID
         """
         if len(nombre.strip()) < 3:
             return []
         
         params = {"nombre": nombre}
-        return self._get("/excel/negocio/buscar-nombre", params=params)
+        resultado = self._get("/excel/negocio/buscar-nombre", params=params)
+        
+        if resultado is None:
+            return []
+        elif isinstance(resultado, list):
+            return resultado
+        else:
+            return []
 
 
 # Instancia global del cliente

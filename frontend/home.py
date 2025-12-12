@@ -74,8 +74,6 @@ with st.sidebar:
     st.info("""
     **Usa el menú superior** para acceder a:
     - 🔍 Buscar Zona
-    - 🗺️ Mapa General
-    - 📊 Estadísticas
     """)
     
     st.markdown("---")
@@ -171,9 +169,10 @@ except Exception as e:
 st.markdown("---")
 st.markdown("## 🚀 ¿Cómo usar el simulador?")
 
-tab1, tab2, tab3 = st.tabs(["🔍 Buscar Zona", "🗺️ Explorar Mapa", "📊 Ver Estadísticas"])
+# Solo una pestaña
+tab1 = st.tabs(["🔍 Buscar Zona"])
 
-with tab1:
+with tab1[0]:
     st.markdown("""
     ### Paso a paso:
     
@@ -201,37 +200,6 @@ with tab1:
     """)
     
     st.info("💡 **Tip:** Comienza con un radio de 2-3 km para una zona urbana típica.")
-
-with tab2:
-    st.markdown("""
-    ### Explora el mapa general:
-    
-    - **Vista completa** de todos los negocios en Baja California
-    - **Filtros** por tipo de actividad empresarial
-    - **Clustering automático** cuando hay muchos marcadores cercanos
-    - **Click en los marcadores** para ver detalles del negocio
-    - **Zoom** para enfocarte en una zona específica
-    
-    #### Controles del mapa:
-    - ➕ / ➖ : Acercar / Alejar
-    - 🖱️ Arrastra: Mover el mapa
-    - 📍 Click: Ver información del negocio
-    """)
-
-with tab3:
-    st.markdown("""
-    ### Panel de estadísticas:
-    
-    - 📊 **Top 10 actividades** más comunes en BC
-    - 🗺️ **Distribución geográfica** por municipio
-    - 📈 **Gráficas de densidad** por zona
-    - 🔍 **Análisis de tendencias** (si hay datos temporales)
-    
-    Estas estadísticas te ayudan a entender:
-    - ¿Qué tipos de negocios son más comunes?
-    - ¿Dónde hay mayor concentración?
-    - ¿Qué sectores están saturados?
-    """)
 
 # ========== CONSIDERACIONES ==========
 st.markdown("---")

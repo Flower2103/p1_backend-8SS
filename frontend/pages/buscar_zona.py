@@ -1,6 +1,5 @@
 """
-🔍 Página de Búsqueda por Zona y Recomendación
-Permite buscar negocios en un radio y obtener recomendaciones de apertura
+🔍 Búsqueda por Zona - Un solo mapa que muestra los resultados
 """
 
 import streamlit as st
@@ -9,19 +8,16 @@ import os
 from streamlit_folium import st_folium
 import folium
 
-# Agregar la carpeta utils al path
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'utils'))
 from api_client import api
 from map_generator import MapGenerator
 
-# ========== CONFIGURACIÓN DE LA PÁGINA ==========
 st.set_page_config(
     page_title="Buscar Zona - Simulador BC",
     page_icon="🔍",
     layout="wide"
 )
 
-# ========== ESTILOS CUSTOM ==========
 st.markdown("""
 <style>
     .recomendacion-box {
@@ -43,341 +39,235 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ========== HEADER ==========
 st.title("🔍 Buscar Zona y Recomendación")
 st.markdown("Selecciona una ubicación en el mapa y analiza la densidad de negocios")
 st.markdown("---")
 
-# ========== VARIABLES DE SESIÓN ==========
+# Variables de sesión
 if 'latitud_seleccionada' not in st.session_state:
     st.session_state.latitud_seleccionada = 32.5149
 if 'longitud_seleccionada' not in st.session_state:
     st.session_state.longitud_seleccionada = -117.0382
+if 'mostrar_resultados' not in st.session_state:
+    st.session_state.mostrar_resultados = False
+if 'datos_analisis' not in st.session_state:
+    st.session_state.datos_analisis = None
 
-# ========== SIDEBAR: CONFIGURACIÓN ==========
-with st.sidebar:
-    st.markdown("### ⚙️ Configuración de Búsqueda")
-    
-    # Método de selección de ubicación
-    metodo = st.radio(
-        "¿Cómo deseas buscar la ubicación?",
-        ["🗺️ Seleccionar en el Mapa", "📍 Coordenadas Manuales", "🔍 Buscar por Nombre"],
-        key="metodo_ubicacion"
-    )
-    
-    st.markdown("---")
+# ========== PARÁMETROS (ARRIBA DEL MAPA) ==========
+st.markdown("## 🎯 Configuración del Análisis")
 
-# ========== SECCIÓN: SELECCIÓN DE UBICACIÓN ==========
-st.markdown("## 📍 Paso 1: Selecciona la Ubicación")
+col1, col2, col3 = st.columns(3)
 
-if metodo == "🗺️ Seleccionar en el Mapa":
-    st.info("👆 Haz **click en el mapa** para seleccionar la ubicación de tu negocio")
+with col1:
+    # Selector de rango
+    rango = st.radio("Rango:", ["🔍 Corto (100m - 1km)", "📏 Largo (1-10km)"], horizontal=True)
     
-    # Crear mapa interactivo
-    mapa_seleccion = folium.Map(
+    if rango == "🔍 Corto (100m - 1km)":
+        # De 100 en 100 metros
+        radio_metros = st.slider("Radio (metros):", 100, 1000, 200, 100)
+        radio_km = radio_metros / 1000
+        st.info(f"**Radio:** {radio_metros}m ({radio_km:.1f} km)")
+    else:
+        # De 0.5 en 0.5 km
+        radio_km = st.slider("Radio (km):", 1.0, 10.0, 2.0, 0.5)
+        st.info(f"**Radio:** {radio_km} km")
+
+with col2:
+    st.markdown("### 🏪 Tipo de Negocio")
+
+    # ================== ACTIVIDADES DINÁMICAS ==================
+    import requests
+
+    try:
+        resp = requests.get("http://localhost:5500/excel/actividades")  # Cambiar host/puerto si es remoto
+        if resp.status_code == 200:
+            actividades_list = resp.json()
+        else:
+            actividades_list = []
+    except Exception as e:
+        st.warning(f"⚠️ No se pudieron cargar las actividades: {e}")
+        actividades_list = []
+
+    # Crear diccionario id → nombre
+    actividades_bd = {a["id_actividad_empresarial"]: a["actividad_texto"] for a in actividades_list}
+    nombres = sorted(list(actividades_bd.values()))
+
+    # Container con scroll
+    # Container con scroll vertical usando selectbox
+    with st.container():
+        
+        if nombres:
+            actividad_nombre = st.selectbox(
+                "Selecciona actividad:",
+                options=nombres,
+                key="select_act"
+            )
+            id_actividad = [k for k, v in actividades_bd.items() if v == actividad_nombre][0]
+        else:
+            st.info("No hay actividades disponibles")
+            actividad_nombre = None
+            id_actividad = None
+        
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("""
+        <style>
+        div[data-testid="stRadio"] > div {
+            max-height: 250px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 10px;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+
+with col3:
+    st.write("")  # Espaciador
+    st.write("")  # Espaciador
+    if st.button("🚀 ANALIZAR ZONA", type="primary", use_container_width=True):
+        with st.spinner("🔄 Analizando..."):
+            rec = api.obtener_recomendacion(
+                st.session_state.latitud_seleccionada,
+                st.session_state.longitud_seleccionada,
+                radio_km,
+                id_actividad
+            )
+            
+            negocios = api.obtener_negocios_por_radio(
+                st.session_state.latitud_seleccionada,
+                st.session_state.longitud_seleccionada,
+                radio_km
+            )
+            
+            similares = [n for n in negocios if n.get('id_actividad_empresarial') == id_actividad] if negocios else []
+            
+            # GUARDAR en sesión
+            st.session_state.datos_analisis = {
+                'recomendacion': rec,
+                'negocios': negocios,
+                'similares': similares,
+                'radio': radio_km,
+                'id_actividad': id_actividad
+            }
+            st.session_state.mostrar_resultados = True
+            st.rerun()
+
+st.markdown("---")
+
+# ========== RESULTADOS (SI EXISTEN) ==========
+if st.session_state.mostrar_resultados and st.session_state.datos_analisis:
+    datos = st.session_state.datos_analisis
+    rec = datos['recomendacion']
+    
+    if rec:
+        # Métricas
+        col1, col2, col3 = st.columns(3)
+        col1.metric("🏪 Total de Negocios", rec.get('total_en_radio', 0))
+        col2.metric("🎯 Competidores Directos", rec.get('similares', 0))
+        col3.metric("📊 Densidad/km²", f"{rec.get('similares', 0) / (datos['radio']**2):.2f}")
+        
+        # Recomendación
+        texto = rec.get('recomendacion', '')
+        clase = "buena-oportunidad" if "Buena" in texto else "zona-saturada"
+        icono = "🎉" if "Buena" in texto else "⚠️"
+        st.markdown(f'<div class="recomendacion-box {clase}">{icono} {texto}</div>', unsafe_allow_html=True)
+        
+        st.markdown("---")
+
+# ========== MAPA (SIEMPRE VISIBLE) ==========
+st.markdown("## 🗺️ Mapa Interactivo")
+
+# Determinar qué mapa mostrar
+if st.session_state.mostrar_resultados and st.session_state.datos_analisis:
+    # Mostrar mapa con RESULTADOS
+    datos = st.session_state.datos_analisis
+    negocios = datos.get('negocios', [])
+    similares = datos.get('similares', [])
+    
+    if negocios and len(negocios) > 0:
+        st.info(f"""
+        **Leyenda:**
+        - 🔴 **Estrella Roja:** Tu ubicación
+        - 🟠 **Naranjas:** Competidores directos ({len(similares)})
+        - 🟢 **Verdes:** Otros negocios
+        - 🔵 **Círculo:** Radio de búsqueda ({datos['radio']} km)
+        
+        **Total en mapa:** {len(negocios)} negocios
+        """)
+        
+        # Crear mapa con resultados
+        mapa = MapGenerator.crear_mapa_recomendacion(
+            st.session_state.latitud_seleccionada,
+            st.session_state.longitud_seleccionada,
+            datos['radio'],
+            negocios,
+            similares
+        )
+    else:
+        # Si no hay negocios, mostrar mapa vacío con mensaje
+        st.warning("⚠️ No se encontraron negocios en esta zona")
+        mapa = folium.Map(
+            location=[st.session_state.latitud_seleccionada, st.session_state.longitud_seleccionada],
+            zoom_start=13,
+            tiles="OpenStreetMap"
+        )
+        folium.Marker(
+            location=[st.session_state.latitud_seleccionada, st.session_state.longitud_seleccionada],
+            popup="📍 Tu ubicación",
+            icon=folium.Icon(color="red", icon="star")
+        ).add_to(mapa)
+
+else:
+    # Mostrar mapa de SELECCIÓN (antes de analizar)
+    st.info("👆 Haz **click en el mapa** para cambiar la ubicación, luego configura los parámetros arriba y presiona **ANALIZAR**")
+    
+    mapa = folium.Map(
         location=[st.session_state.latitud_seleccionada, st.session_state.longitud_seleccionada],
         zoom_start=12,
         tiles="OpenStreetMap"
     )
     
-    # Agregar marcador actual
     folium.Marker(
         location=[st.session_state.latitud_seleccionada, st.session_state.longitud_seleccionada],
         popup="📍 Ubicación seleccionada",
         tooltip="Tu ubicación",
         icon=folium.Icon(color="red", icon="star")
-    ).add_to(mapa_seleccion)
+    ).add_to(mapa)
     
-    # Agregar plugin para detectar clicks
-    mapa_seleccion.add_child(folium.LatLngPopup())
-    
-    # Mostrar mapa y capturar clicks
-    map_data = st_folium(
-        mapa_seleccion,
-        width=1200,
-        height=500,
-        key="mapa_seleccion"
-    )
-    
-    # Actualizar coordenadas cuando se hace click
+    # Plugin para detectar clicks
+    mapa.add_child(folium.LatLngPopup())
+
+# Mostrar el mapa (sin key para que persista)
+map_data = st_folium(mapa, width=1200, height=600)
+
+# Actualizar coordenadas si hubo click (solo en modo selección)
+if not st.session_state.mostrar_resultados:
     if map_data and map_data.get('last_clicked'):
-        lat_click = map_data['last_clicked']['lat']
-        lon_click = map_data['last_clicked']['lng']
+        nueva_lat = map_data['last_clicked']['lat']
+        nueva_lon = map_data['last_clicked']['lng']
         
-        # Solo actualizar si cambió la ubicación
-        if (abs(lat_click - st.session_state.latitud_seleccionada) > 0.0001 or 
-            abs(lon_click - st.session_state.longitud_seleccionada) > 0.0001):
+        if (abs(nueva_lat - st.session_state.latitud_seleccionada) > 0.0001 or 
+            abs(nueva_lon - st.session_state.longitud_seleccionada) > 0.0001):
             
-            st.session_state.latitud_seleccionada = lat_click
-            st.session_state.longitud_seleccionada = lon_click
-            
-            st.success(f"✅ **Nueva ubicación seleccionada:** {lat_click:.6f}, {lon_click:.6f}")
-        
-    # Mostrar coordenadas actuales
-    col_coord1, col_coord2 = st.columns(2)
-    with col_coord1:
-        st.metric("📍 Latitud", f"{st.session_state.latitud_seleccionada:.6f}")
-    with col_coord2:
-        st.metric("📍 Longitud", f"{st.session_state.longitud_seleccionada:.6f}")
+            st.session_state.latitud_seleccionada = nueva_lat
+            st.session_state.longitud_seleccionada = nueva_lon
+            st.success(f"✅ Nueva ubicación: {nueva_lat:.6f}, {nueva_lon:.6f}")
+            st.rerun()
 
-elif metodo == "📍 Coordenadas Manuales":
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        latitud = st.number_input(
-            "Latitud:",
-            value=st.session_state.latitud_seleccionada,
-            format="%.6f",
-            step=0.0001,
-            key="lat_manual"
-        )
-    
-    with col2:
-        longitud = st.number_input(
-            "Longitud:",
-            value=st.session_state.longitud_seleccionada,
-            format="%.6f",
-            step=0.0001,
-            key="lon_manual"
-        )
-    
-    st.session_state.latitud_seleccionada = latitud
-    st.session_state.longitud_seleccionada = longitud
-    
-    st.info(f"📍 Ubicación seleccionada: **{latitud:.6f}, {longitud:.6f}**")
-
-else:  # Buscar por nombre
-    st.markdown("### 🔍 Búsqueda Predictiva")
-    
-    nombre_busqueda = st.text_input(
-        "Escribe el nombre del negocio (mínimo 3 caracteres):",
-        placeholder="Ej: Oxxo, Soriana, Farmacia...",
-        key="buscar_nombre"
-    )
-    
-    if len(nombre_busqueda) >= 3:
-        with st.spinner("Buscando..."):
-            resultados = api.buscar_por_nombre(nombre_busqueda)
-            
-            if resultados and len(resultados) > 0:
-                st.success(f"✅ Se encontraron {len(resultados)} resultados")
-                
-                opciones = {
-                    f"{r.get('nombre_comercial', 'Sin nombre')} (ID: {r.get('id_registro', 'N/A')})": r
-                    for r in resultados
-                }
-                
-                seleccion = st.selectbox(
-                    "Selecciona un negocio:",
-                    options=list(opciones.keys()),
-                    key="select_negocio"
-                )
-                
-                if seleccion:
-                    negocio_seleccionado = opciones[seleccion]
-                    id_negocio = negocio_seleccionado.get('id_registro')
-                    
-                    with st.spinner("Cargando detalles..."):
-                        detalle = api.obtener_negocio_por_id(id_negocio)
-                        
-                        if detalle:
-                            lat = float(detalle.get('latitud', 0))
-                            lon = float(detalle.get('longitud', 0))
-                            
-                            st.session_state.latitud_seleccionada = lat
-                            st.session_state.longitud_seleccionada = lon
-                            
-                            st.success(f"""
-                            ✅ **Negocio seleccionado:**
-                            - **Nombre:** {detalle.get('nombre_comercial', 'N/A')}
-                            - **Actividad:** {detalle.get('actividad_texto', 'N/A')}
-                            - **Coordenadas:** {lat:.6f}, {lon:.6f}
-                            """)
-            else:
-                st.warning("⚠️ No se encontraron resultados")
-    elif len(nombre_busqueda) > 0:
-        st.info("ℹ️ Escribe al menos 3 caracteres para buscar")
+# Mostrar coordenadas actuales
+col1, col2, col3 = st.columns([1, 1, 1])
+with col1:
+    st.metric("📍 Latitud", f"{st.session_state.latitud_seleccionada:.6f}")
+with col2:
+    st.metric("📍 Longitud", f"{st.session_state.longitud_seleccionada:.6f}")
+with col3:
+    if st.session_state.mostrar_resultados:
+        if st.button("🔄 Nueva Búsqueda", use_container_width=True):
+            st.session_state.mostrar_resultados = False
+            st.session_state.datos_analisis = None
+            st.rerun()
 
 st.markdown("---")
-
-# ========== SECCIÓN: PARÁMETROS DE BÚSQUEDA ==========
-st.markdown("## 🎯 Paso 2: Define los Parámetros")
-
-col_param1, col_param2 = st.columns(2)
-
-with col_param1:
-    st.markdown("### 📏 Radio de Búsqueda")
-    radio_km = st.slider(
-        "Selecciona el radio en kilómetros:",
-        min_value=0.5,
-        max_value=10.0,
-        value=2.0,
-        step=0.5,
-        format="%.1f km",
-        key="radio_slider"
-    )
-    
-    st.info(f"""
-    **Radio seleccionado:** {radio_km} km
-    
-    💡 **Recomendaciones:**
-    - **0.5-2 km:** Zona muy local (colonia)
-    - **2-5 km:** Zona urbana amplia
-    - **5-10 km:** Región extensa
-    """)
-
-with col_param2:
-    st.markdown("### 🏪 Tipo de Negocio")
-    
-    actividades_ejemplo = {
-        "6111 - Restaurantes": 6111,
-        "4621 - Tienda de Abarrotes": 4621,
-        "4641 - Farmacia": 4641,
-        "8121 - Salón de Belleza": 8121,
-        "7211 - Hotel": 7211,
-        "4661 - Ferretería": 4661,
-        "Otro (Ingresar ID manualmente)": -1
-    }
-    
-    tipo_seleccionado = st.selectbox(
-        "Selecciona el tipo de negocio que deseas abrir:",
-        options=list(actividades_ejemplo.keys()),
-        key="tipo_negocio"
-    )
-    
-    if actividades_ejemplo[tipo_seleccionado] == -1:
-        id_actividad = st.number_input(
-            "Ingresa el ID de actividad empresarial:",
-            min_value=1,
-            value=6111,
-            step=1,
-            key="id_actividad_manual"
-        )
-    else:
-        id_actividad = actividades_ejemplo[tipo_seleccionado]
-    
-    st.info(f"**ID de actividad seleccionado:** {id_actividad}")
-
-st.markdown("---")
-
-# ========== BOTÓN DE ANÁLISIS ==========
-col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-
-with col_btn2:
-    boton_analizar = st.button(
-        "🚀 ANALIZAR ZONA Y OBTENER RECOMENDACIÓN",
-        type="primary",
-        use_container_width=True
-    )
-
-# ========== ANÁLISIS Y RESULTADOS ==========
-if boton_analizar:
-    st.markdown("---")
-    st.markdown("## 📊 Resultados del Análisis")
-    
-    with st.spinner("🔄 Analizando zona..."):
-        # Obtener recomendación
-        recomendacion = api.obtener_recomendacion(
-            st.session_state.latitud_seleccionada,
-            st.session_state.longitud_seleccionada,
-            radio_km,
-            id_actividad
-        )
-        
-        # Obtener negocios del radio
-        negocios_radio = api.obtener_negocios_por_radio(
-            st.session_state.latitud_seleccionada,
-            st.session_state.longitud_seleccionada,
-            radio_km
-        )
-        
-        # Filtrar similares
-        negocios_similares = [
-            n for n in negocios_radio 
-            if n.get('id_actividad_empresarial') == id_actividad
-        ] if negocios_radio else []
-    
-    if recomendacion:
-        # Métricas
-        col_met1, col_met2, col_met3 = st.columns(3)
-        
-        with col_met1:
-            st.metric(
-                label="🏪 Total de Negocios",
-                value=recomendacion.get('total_en_radio', 0)
-            )
-        
-        with col_met2:
-            similares = recomendacion.get('similares', 0)
-            st.metric(
-                label="🎯 Competidores Directos",
-                value=similares,
-                delta=f"{similares} del mismo tipo",
-                delta_color="inverse"
-            )
-        
-        with col_met3:
-            densidad = (similares / radio_km**2) if radio_km > 0 else 0
-            st.metric(
-                label="📊 Densidad",
-                value=f"{densidad:.2f}",
-                help="Competidores por km²"
-            )
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Recomendación
-        recomendacion_texto = recomendacion.get('recomendacion', 'Sin datos')
-        
-        if "Buena oportunidad" in recomendacion_texto:
-            st.markdown(f"""
-            <div class="recomendacion-box buena-oportunidad">
-                🎉 {recomendacion_texto}
-                <br><br>
-                ✅ Esta zona tiene baja densidad de competidores directos.
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown(f"""
-            <div class="recomendacion-box zona-saturada">
-                ⚠️ {recomendacion_texto}
-                <br><br>
-                🔴 Esta zona tiene alta densidad de competidores.
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("---")
-        
-        # Mapa interactivo
-        st.markdown("## 🗺️ Visualización en Mapa")
-        
-        if negocios_radio:
-            st.info(f"""
-            **Leyenda:**
-            - 🔴 **Estrella Roja:** Tu ubicación propuesta
-            - 🟠 **Marcadores Naranjas:** Competidores directos ({similares})
-            - 🟢 **Marcadores Verdes:** Otros tipos de negocios
-            - 🔵 **Círculo Azul:** Radio de búsqueda ({radio_km} km)
-            """)
-            
-            mapa = MapGenerator.crear_mapa_recomendacion(
-                st.session_state.latitud_seleccionada,
-                st.session_state.longitud_seleccionada,
-                radio_km,
-                negocios_radio,
-                negocios_similares
-            )
-            
-            st_folium(mapa, width=1200, height=600)
-        else:
-            st.warning("⚠️ No se encontraron negocios en esta zona")
-    else:
-        st.error("❌ No se pudo obtener la recomendación.")
-
-# Footer
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #666; padding: 1rem 0;">
-    <p>🔍 Análisis de densidad de negocios en Baja California</p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown('<div style="text-align:center;color:#666;">🔍 Simulador de Negocios - Baja California</div>', unsafe_allow_html=True)
