@@ -24,6 +24,8 @@ from math import radians, sin, cos, sqrt, atan2
 # ==================== CONFIGURACIÓN ====================
 app = Flask(__name__)
 CORS(app)
+STREAMLIT_URL = "https://p1backend-8ss-kqefehuk3endd5fbq4muva.streamlit.app/" 
+CORS(app, origins=[STREAMLIT_URL])
 
 # Configuración de caché
 cache_config = {
